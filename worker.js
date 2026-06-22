@@ -14,8 +14,6 @@ const TARGETS = [
   ["TK", "https://www.tiktok.com/"],
   ["X", "https://x.com/"],
   ["IG", "https://www.instagram.com/"],
-  ["FB", "https://www.facebook.com/"],
-  ["RD", "https://www.reddit.com/"]
 ];
 
 function sleep(ms) {
