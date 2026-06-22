@@ -11,10 +11,11 @@ const SECRET = "V9_Secure_Tunnel_Token_2026_RN";
 
 const TARGETS = [
   ["YT", "https://www.youtube.com/"],
-  ["GPT", "https://chatgpt.com/"],
-  ["X", "https://x.com/"],
   ["TK", "https://www.tiktok.com/"],
-  ["GOOGLE", "https://www.google.com/"]
+  ["X", "https://x.com/"],
+  ["IG", "https://www.instagram.com/"],
+  ["FB", "https://www.facebook.com/"],
+  ["RD", "https://www.reddit.com/"]
 ];
 
 function sleep(ms) {
