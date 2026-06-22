@@ -14,13 +14,22 @@ const TARGETS = [
   ["TK", "https://www.tiktok.com/"],
   ["X", "https://x.com/"],
   ["IG", "https://www.instagram.com/"],
+  ["RD", "https://www.reddit.com/"],
+  ["CNN", "https://www.cnn.com/"]
 ];
+
+const SHOTS_PER_TARGET = 3;
+const READ_LIMIT_BYTES = 8192;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function probeTarget(name, targetUrl) {
+function randDelayMs() {
+  return 100 + Math.floor(Math.random() * 400);
+}
+
+async function probeOnce(targetUrl) {
   const start = Date.now();
 
   try {
@@ -47,7 +56,7 @@ async function probeTarget(name, targetUrl) {
     if (response.body) {
       const reader = response.body.getReader();
 
-      while (bodyBytes < 8192) {
+      while (bodyBytes < READ_LIMIT_BYTES) {
         const { done, value } = await reader.read();
         if (done) break;
         if (value) bodyBytes += value.byteLength;
@@ -59,7 +68,6 @@ async function probeTarget(name, targetUrl) {
     }
 
     return {
-      name,
       ok: response.ok && bodyBytes > 0,
       status: response.status,
       ms: Date.now() - start,
@@ -69,7 +77,6 @@ async function probeTarget(name, targetUrl) {
 
   } catch (err) {
     return {
-      name,
       ok: false,
       status: 0,
       ms: Date.now() - start,
@@ -78,6 +85,24 @@ async function probeTarget(name, targetUrl) {
       error: err.name || "FetchFailed"
     };
   }
+}
+
+async function probeTarget(name, targetUrl) {
+  const shots = [];
+
+  for (let i = 0; i < SHOTS_PER_TARGET; i++) {
+    const result = await probeOnce(targetUrl);
+    shots.push(result);
+
+    if (i < SHOTS_PER_TARGET - 1) {
+      await sleep(randDelayMs());
+    }
+  }
+
+  return {
+    name,
+    shots
+  };
 }
 
 export default {
@@ -122,8 +147,7 @@ export default {
       results.push(result);
 
       if (i < TARGETS.length - 1) {
-        const waitMs = 500 + Math.floor(Math.random() * 1500);
-        await sleep(waitMs);
+        await sleep(randDelayMs());
       }
     }
 
@@ -139,33 +163,47 @@ export default {
     headers.set("X-V9-Route-Status", routeStatus);
     headers.set("X-V9-Internal-Total-Ms", totalInternalMs.toString());
 
-    let okCount = 0;
+    let okTargetCount = 0;
 
-    for (const r of results) {
-      headers.set(`X-V9-${r.name}-Ms`, String(r.ms));
-      headers.set(`X-V9-${r.name}-Status`, String(r.status));
-      headers.set(`X-V9-${r.name}-Ok`, r.ok ? "1" : "0");
-      headers.set(`X-V9-${r.name}-Bytes`, String(r.bytes));
-      headers.set(`X-V9-${r.name}-Type`, r.type.slice(0, 80));
+    for (const target of results) {
+      const name = target.name;
+      let okShotCount = 0;
 
-      if (r.error) {
-        headers.set(`X-V9-${r.name}-Error`, r.error);
+      for (let i = 0; i < target.shots.length; i++) {
+        const shot = target.shots[i];
+        const n = i + 1;
+
+        headers.set(`X-V9-${name}-${n}-Ms`, String(shot.ms));
+        headers.set(`X-V9-${name}-${n}-Status`, String(shot.status));
+        headers.set(`X-V9-${name}-${n}-Ok`, shot.ok ? "1" : "0");
+        headers.set(`X-V9-${name}-${n}-Bytes`, String(shot.bytes));
+        headers.set(`X-V9-${name}-${n}-Type`, shot.type.slice(0, 80));
+
+        if (shot.error) {
+          headers.set(`X-V9-${name}-${n}-Error`, shot.error);
+        }
+
+        if (shot.ok) okShotCount++;
       }
 
-      if (r.ok) okCount++;
+      headers.set(`X-V9-${name}-Ok-Count`, String(okShotCount));
+
+      if (okShotCount > 0) okTargetCount++;
     }
 
-    headers.set("X-V9-Ok-Count", String(okCount));
+    headers.set("X-V9-Ok-Count", String(okTargetCount));
     headers.set("X-V9-Target-Count", String(TARGETS.length));
+    headers.set("X-V9-Shots-Per-Target", String(SHOTS_PER_TARGET));
 
     return new Response(JSON.stringify({
       colo: actualColo,
       route_status: routeStatus,
       total_ms: totalInternalMs,
-      ok_count: okCount,
+      ok_count: okTargetCount,
+      shots_per_target: SHOTS_PER_TARGET,
       targets: results
     }), {
-      status: okCount > 0 ? 200 : 502,
+      status: okTargetCount > 0 ? 200 : 502,
       headers
     });
   }
