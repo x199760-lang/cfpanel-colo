@@ -18,7 +18,7 @@ const TARGETS = [
   ["CNN", "https://www.cnn.com/"]
 ];
 
-const SHOTS_PER_TARGET = 3;
+const SHOTS_PER_TARGET = 5;
 const READ_LIMIT_BYTES = 8192;
 
 function sleep(ms) {
