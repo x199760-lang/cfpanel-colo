@@ -7,89 +7,145 @@ const ALLOWED_HOSTS = [
   "colo.vpstool09.xyz"
 ];
 
+const SECRET = "V9_Secure_Tunnel_Token_2026_RN";
+
+const TARGETS = [
+  ["YT", "https://www.youtube.com/"],
+  ["GPT", "https://chatgpt.com/"],
+  ["X", "https://x.com/"],
+  ["TK", "https://www.tiktok.com/"],
+  ["GOOGLE", "https://www.google.com/"]
+];
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function probeTarget(name, targetUrl) {
+  const start = Date.now();
+
+  try {
+    const cacheBuster = `?v9_ts=${start}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const response = await fetch(targetUrl + cacheBuster, {
+      method: "HEAD",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache"
+      },
+      redirect: "follow",
+      cf: {
+        cacheTtl: 0,
+        cacheEverything: false
+      }
+    });
+
+    return {
+      name,
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - start
+    };
+
+  } catch (err) {
+    return {
+      name,
+      ok: false,
+      status: 0,
+      ms: Date.now() - start,
+      error: err.name || "FetchFailed"
+    };
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 1. Host 安全闭环
     if (!ALLOWED_HOSTS.includes(url.hostname)) {
       return new Response("Access Denied: Host Forbidden", { status: 403 });
     }
 
-    // 2. 安全锁鉴权
     const secretToken = request.headers.get("X-V9-Secret");
-    if (secretToken !== "V9_Secure_Tunnel_Token_2026_RN") {
+    if (secretToken !== SECRET) {
       return new Response("Unauthorized", { status: 401 });
     }
 
-    // 3. 必须走指定的测速密道
     if (url.pathname !== "/probe") {
       return new Response("Not Found", { status: 404 });
     }
 
-    // 🌟 新增高级变量：VPS 脚本可以通过这个 Header 声明它原本期望测试哪个机房（比如 HKG）
+    if (request.method !== "HEAD" && request.method !== "GET") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
     const expectedColo = request.headers.get("X-V9-Expect-Colo") || "ANY";
 
-    // 🎯 目标站
-    const targetUrl = "https://www.youtube.com/";
+    const actualColo = request.cf?.colo || "UNKNOWN";
+    const cfAsn = request.cf?.asn || "UNKNOWN";
+    const cfCountry = request.cf?.country || "UNKNOWN";
 
-    // 记录 Workers 开始向目标站发起请求的时间戳
-    const startTime = Date.now();
+    let routeStatus = "Matched";
+    if (expectedColo !== "ANY" && expectedColo.toUpperCase() !== actualColo.toUpperCase()) {
+      routeStatus = "Hijacked";
+    }
 
-    try {
-      // 极致 HEAD 轻量化探针 + 粉碎缓存
-      const cacheBuster = `?v9_ts=${startTime}_${Math.random().toString(36).substr(2, 5)}`;
-      
-      const response = await fetch(targetUrl + cacheBuster, {
-        method: "HEAD",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          "Pragma": "no-cache",
-          "Connection": "keep-alive"
-        },
-        redirect: "follow"
-      });
+    const allStart = Date.now();
+    const results = [];
 
-      // 计算 CF 机房内部 ➔ YouTube 官方服务器的纯净消耗时间（毫秒）
-      const cfInternalExecutionMs = Date.now() - startTime;
+    for (let i = 0; i < TARGETS.length; i++) {
+      const [name, targetUrl] = TARGETS[i];
 
-      // 捕获 Cloudflare 底层真实网络情报
-      const actualColo = request.cf?.colo || "UNKNOWN"; 
-      const cfAsn = request.cf?.asn || "UNKNOWN";   
-      const cfCountry = request.cf?.country || "UNKNOWN"; 
+      const result = await probeTarget(name, targetUrl);
+      results.push(result);
 
-      // 🌟 新增判定：检查当前被唤醒的机房是否符合预期
-      let routeStatus = "Matched";
-      if (expectedColo !== "ANY" && expectedColo.toUpperCase() !== actualColo.toUpperCase()) {
-        // 如果原本想测香港，结果在洛杉矶被截胡了，打上 "Hijacked"（路由跑偏/吸流）标签
-        routeStatus = "Hijacked";
+      if (i < TARGETS.length - 1) {
+        const waitMs = 500 + Math.floor(Math.random() * 1500);
+        await sleep(waitMs);
+      }
+    }
+
+    const totalInternalMs = Date.now() - allStart;
+
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+
+    headers.set("X-V9-Colo", actualColo);
+    headers.set("X-V9-ASN", `AS${cfAsn}`);
+    headers.set("X-V9-From", cfCountry);
+    headers.set("X-V9-Route-Status", routeStatus);
+    headers.set("X-V9-Internal-Total-Ms", totalInternalMs.toString());
+
+    let okCount = 0;
+
+    for (const r of results) {
+      headers.set(`X-V9-${r.name}-Ms`, String(r.ms));
+      headers.set(`X-V9-${r.name}-Status`, String(r.status));
+      headers.set(`X-V9-${r.name}-Ok`, r.ok ? "1" : "0");
+
+      if (r.error) {
+        headers.set(`X-V9-${r.name}-Error`, r.error);
       }
 
-      // 打包情报随 Header 回传
-      const responseHeaders = new Headers();
-      responseHeaders.set("Content-Type", "application/json");
-      responseHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");
-      
-      responseHeaders.set("X-V9-Colo", actualColo);       // 真正唤醒我的机房（如 LAX）
-      responseHeaders.set("X-V9-ASN", `AS${cfAsn}`);   
-      responseHeaders.set("X-V9-From", cfCountry);    
-      
-      // 🌟 核心情报 1：路由状态标签（Matched 或 Hijacked）
-      responseHeaders.set("X-V9-Route-Status", routeStatus); 
-      
-      // 🌟 核心情报 2：CF机房内部去戳YouTube花了多少毫秒。
-      // 这个指标无视跨太平洋公网延迟，精准体现 CF 机房当时的内部排队、带宽权重和沙盒性能！
-      responseHeaders.set("X-V9-Internal-Ms", cfInternalExecutionMs.toString());
-
-      return new Response(null, {
-        status: response.status,
-        headers: responseHeaders
-      });
-
-    } catch (err) {
-      return new Response("Target Fetch Failed", { status: 502 });
+      if (r.ok) okCount++;
     }
+
+    headers.set("X-V9-Ok-Count", String(okCount));
+    headers.set("X-V9-Target-Count", String(TARGETS.length));
+
+    return new Response(JSON.stringify({
+      colo: actualColo,
+      route_status: routeStatus,
+      total_ms: totalInternalMs,
+      ok_count: okCount,
+      targets: results
+    }), {
+      status: okCount > 0 ? 200 : 502,
+      headers
+    });
   }
 };
