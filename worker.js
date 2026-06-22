@@ -1,95 +1,32 @@
 export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/api") {
-      const cf = request.cf || {};
-
-      const data = {
-        ok: true,
-        ip: request.headers.get("CF-Connecting-IP") || "",
-        colo: cf.colo || "",
-        city: cf.city || "",
-        country: cf.country || "",
-        continent: cf.continent || "",
-        region: cf.region || "",
-        regionCode: cf.regionCode || "",
-        latitude: cf.latitude || "",
-        longitude: cf.longitude || "",
-        asn: cf.asn || "",
-        asOrganization: cf.asOrganization || "",
-        timezone: cf.timezone || "",
-        clientTcpRtt: cf.clientTcpRtt || "",
-        httpProtocol: cf.httpProtocol || "",
-        tlsVersion: cf.tlsVersion || "",
-        tlsCipher: cf.tlsCipher || "",
-        userAgent: request.headers.get("User-Agent") || "",
-        cfRay: request.headers.get("CF-Ray") || "",
-        time: new Date().toISOString()
-      };
-
-      return new Response(JSON.stringify(data, null, 2), {
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          "Access-Control-Allow-Origin": "*"
-        }
-      });
-    }
-
-    return new Response(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title></title>
-<style>
-html,body{
-  margin:0;
-  width:100%;
-  height:100%;
-  overflow:hidden;
-  background:#000;
-}
-
-#wallpaper{
-  position:fixed;
-  inset:0;
-  background:url("https://raw.githubusercontent.com/x199760-lang/cfpanel-colo/main/BB82A8AE-C249-476A-B600-873890F8B860.png") center center no-repeat;
-  background-size:cover;
-  z-index:99999;
-}
-
-#hidden-test{
-  display:none;
-}
-</style>
-</head>
-<body>
-
-<div id="wallpaper"></div>
-
-<div id="hidden-test">
-  <div id="box"></div>
-</div>
-
-<script>
-async function loadInfo(){
-  try{
-    const r=await fetch("/api?ts="+Date.now(),{cache:"no-store"});
-    const d=await r.json();
-    window.__cfpanel_webtest=d;
-  }catch(e){
-    window.__cfpanel_webtest_error=e.message;
-  }
-}
-loadInfo();
-</script>
-
-</body>
-</html>`, {
+  async fetch(request, env, ctx) {
+    // 🎯 目标明确：强行抓取 YouTube 首页，测试首包和初始文字骨架的加载速度
+    const targetUrl = "https://www.youtube.com/"; 
+    
+    // 构造请求头，模拟真实浏览器
+    const modifiedRequest = new Request(targetUrl, {
+      method: request.method,
       headers: {
-        "Content-Type": "text/html;charset=UTF-8"
+        ...request.headers,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9"
       }
     });
-  }
-}
+
+    try {
+      const response = await fetch(modifiedRequest);
+      
+      // 把当前承载你 Worker 的 CF 内部机房节点（例如 LAX/SJC）塞进 Header 带回给 VPS
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("X-CF-Colo", request.cf ? request.cf.colo : "UNKNOWN");
+      
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
+    } catch (err) {
+      return new Response(`Worker 抓取失败: ${err.message}`, { status: 500 });
+    }
+  },
+};
