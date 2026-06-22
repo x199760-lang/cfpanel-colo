@@ -28,7 +28,7 @@ async function probeTarget(name, targetUrl) {
     const cacheBuster = `?v9_ts=${start}_${Math.random().toString(36).slice(2, 8)}`;
 
     const response = await fetch(targetUrl + cacheBuster, {
-      method: "HEAD",
+      method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -43,11 +43,29 @@ async function probeTarget(name, targetUrl) {
       }
     });
 
+    let bodyBytes = 0;
+
+    if (response.body) {
+      const reader = response.body.getReader();
+
+      while (bodyBytes < 8192) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) bodyBytes += value.byteLength;
+      }
+
+      try {
+        await reader.cancel();
+      } catch (_) {}
+    }
+
     return {
       name,
-      ok: response.ok,
+      ok: response.ok && bodyBytes > 0,
       status: response.status,
-      ms: Date.now() - start
+      ms: Date.now() - start,
+      bytes: bodyBytes,
+      type: response.headers.get("content-type") || ""
     };
 
   } catch (err) {
@@ -56,6 +74,8 @@ async function probeTarget(name, targetUrl) {
       ok: false,
       status: 0,
       ms: Date.now() - start,
+      bytes: 0,
+      type: "",
       error: err.name || "FetchFailed"
     };
   }
@@ -126,6 +146,8 @@ export default {
       headers.set(`X-V9-${r.name}-Ms`, String(r.ms));
       headers.set(`X-V9-${r.name}-Status`, String(r.status));
       headers.set(`X-V9-${r.name}-Ok`, r.ok ? "1" : "0");
+      headers.set(`X-V9-${r.name}-Bytes`, String(r.bytes));
+      headers.set(`X-V9-${r.name}-Type`, r.type.slice(0, 80));
 
       if (r.error) {
         headers.set(`X-V9-${r.name}-Error`, r.error);
