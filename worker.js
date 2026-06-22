@@ -1,15 +1,29 @@
+// 🌟 优化点 1：定义严格的域名白名单，阻断全网扫描器白嫖
+const ALLOWED_HOSTS = [
+  "w1.vpstool09.xyz",
+  "w2.vpstool09.xyz",
+  "w3.vpstool09.xyz",
+  "w4.vpstool09.xyz",
+  "w5.vpstool09.xyz",
+  "colo.vpstool09.xyz"
+];
+
 export default {
   async fetch(request, env, ctx) {
-    // 🌟 核心防线 1：绝密安全锁 (Token 鉴权)
-    // 防止被全网扫描器白嫖流量、疯狂刷你的 Worker 额度
+    const url = new URL(request.url);
+
+    // 🌟 优化点 2：Host 闭环防御
+    if (!ALLOWED_HOSTS.includes(url.hostname)) {
+      return new Response("Access Denied: Host Forbidden", { status: 403 });
+    }
+
+    // 🌟 核心防线：安全锁鉴权 Token
     const secretToken = request.headers.get("X-V9-Secret");
     if (secretToken !== "V9_Secure_Tunnel_Token_2026_RN") {
       return new Response("Unauthorized", { status: 401 });
     }
 
-    // 🌟 核心防线 2：安全过滤机制
-    // 只允许 VPS 脚本通过特定的探针路径访问，其他乱戳的一律拒绝
-    const url = new URL(request.url);
+    // 必须走指定的测速密道
     if (url.pathname !== "/probe") {
       return new Response("Not Found", { status: 404 });
     }
@@ -18,33 +32,43 @@ export default {
     const targetUrl = "https://www.youtube.com/";
 
     try {
-      // 🌟 核心优化 3：把网络大卡车（GET）变成超级跑车（HEAD）
-      // 我们只使用 HEAD 请求，去抓 YouTube 官方服务器的响应头，不下载任何网页肉体！
-      // 这能把 CF 机房的响应速度拉满，且极度节省 VPS 测速时的并发带宽
-      const response = await fetch(targetUrl, {
+      // 🌟 优化点 3：极致 HEAD 轻量化探针，打碎缓存机制
+      // 强制加入随机数参数防止目标站响应被缓存，拿到最纯净的内网直连全链路延迟
+      const cacheBuster = `?v9_ts=${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      
+      const response = await fetch(targetUrl + cacheBuster, {
         method: "HEAD",
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Cache-Control": "no-cache", // 强制每次都去戳 YouTube，拿到最真实的动态响应时间
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
           "Connection": "keep-alive"
         },
         redirect: "follow"
       });
 
-      // 🌟 核心处理 4：将状态码和原厂 Headers 干净利落地吐回给你的 VPS 脚本
+      // 🌟 优化点 4：获取 Cloudflare 边缘节点最硬核的底层网络地理数据
+      const cfColo = request.cf?.colo || "UNKNOWN"; // 例如: LAX, HKG, SJC
+      const cfAsn = request.cf?.asn || "UNKNOWN";   // 运营商 ASN 骨干网号
+      const cfCountry = request.cf?.country || "UNKNOWN"; // 请求来源国家/地区
+
+      // 🌟 优化点 5：打包所有机房内幕数据，随 Header 一起反向吐给你的 VPS 脚本
+      const responseHeaders = new Headers();
+      responseHeaders.set("Content-Type", "application/json");
+      responseHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      
+      // 偷渡给 VPS 的核心网络情报
+      responseHeaders.set("X-V9-Colo", cfColo);       // 物理机房代号
+      responseHeaders.set("X-V9-ASN", `AS${cfAsn}`);   // 骨干网号
+      responseHeaders.set("X-V9-From", cfCountry);    // 来源地
+
       return new Response(null, {
         status: response.status,
-        headers: {
-          "Content-Type": "application/json",
-          "X-V9-Status": "Success",
-          "Cache-Control": "no-store"
-        }
+        headers: responseHeaders
       });
 
     } catch (err) {
-      // 如果 CF 机房连接目标站挂了，透传 502 错误
       return new Response("Target Fetch Failed", { status: 502 });
     }
   }
